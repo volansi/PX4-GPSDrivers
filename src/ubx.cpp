@@ -1174,6 +1174,9 @@ GPSDriverUBX::payloadRxInit()
 
 		} else if (!_use_nav_pvt) {
 			_rx_state = UBX_RXMSG_DISABLE;        // disable if not using NAV-PVT
+
+		} else {
+			_gps_position->timestamp_sample = gps_absolute_time();
 		}
 
 		break;
@@ -1197,6 +1200,9 @@ GPSDriverUBX::payloadRxInit()
 
 		} else if (_use_nav_pvt) {
 			_rx_state = UBX_RXMSG_DISABLE;        // disable if using NAV-PVT instead
+
+		} else {
+			_gps_position->timestamp_sample = gps_absolute_time();
 		}
 
 		break;
@@ -1245,6 +1251,9 @@ GPSDriverUBX::payloadRxInit()
 
 		} else if (_use_nav_pvt) {
 			_rx_state = UBX_RXMSG_DISABLE;        // disable if using NAV-PVT instead
+
+		} else {
+			_gps_position->timestamp_sample = gps_absolute_time();
 		}
 
 		break;
@@ -1743,6 +1752,7 @@ GPSDriverUBX::payloadRxDone()
 		if ((_buf.payload_rx_nav_pvt.valid & UBX_RX_NAV_PVT_VALID_VALIDDATE)
 		    && (_buf.payload_rx_nav_pvt.valid & UBX_RX_NAV_PVT_VALID_VALIDTIME)
 		    && (_buf.payload_rx_nav_pvt.valid & UBX_RX_NAV_PVT_VALID_FULLYRESOLVED)) {
+
 			/* convert to unix timestamp */
 			tm timeinfo{};
 			timeinfo.tm_year	= _buf.payload_rx_nav_pvt.year - 1900;
@@ -1752,34 +1762,16 @@ GPSDriverUBX::payloadRxDone()
 			timeinfo.tm_min		= _buf.payload_rx_nav_pvt.min;
 			timeinfo.tm_sec		= _buf.payload_rx_nav_pvt.sec;
 
-#ifndef NO_MKTIME
 			time_t epoch = mktime(&timeinfo);
 
 			if (epoch > GPS_EPOCH_SECS) {
-				// FMUv2+ boards have a hardware RTC, but GPS helps us to configure it
-				// and control its drift. Since we rely on the HRT for our monotonic
-				// clock, updating it from time to time is safe.
-
-				timespec ts{};
-				ts.tv_sec = epoch;
-				ts.tv_nsec = _buf.payload_rx_nav_pvt.nano;
-
-				setClock(ts);
-
 				_gps_position->time_utc_usec = static_cast<uint64_t>(epoch) * 1000000ULL;
 				_gps_position->time_utc_usec += _buf.payload_rx_nav_pvt.nano / 1000;
 
 			} else {
 				_gps_position->time_utc_usec = 0;
 			}
-
-#else
-			_gps_position->time_utc_usec = 0;
-#endif
 		}
-
-		_gps_position->timestamp = gps_absolute_time();
-		_last_timestamp_time = _gps_position->timestamp;
 
 		_rate_count_vel++;
 		_rate_count_lat_lon++;
@@ -1816,8 +1808,6 @@ GPSDriverUBX::payloadRxDone()
 		_gps_position->epv	= static_cast<float>(_buf.payload_rx_nav_posllh.vAcc) * 1e-3f; // from mm to m
 		_gps_position->alt_ellipsoid = _buf.payload_rx_nav_posllh.height;
 
-		_gps_position->timestamp = gps_absolute_time();
-
 		_rate_count_lat_lon++;
 		_got_posllh = true;
 
@@ -1845,6 +1835,7 @@ GPSDriverUBX::payloadRxDone()
 
 	case UBX_MSG_NAV_TIMEUTC:
 		UBX_TRACE_RXMSG("Rx NAV-TIMEUTC");
+		fprintf(stderr, "UBX_MSG_NAV_TIMEUTC\n");
 
 		if (_buf.payload_rx_nav_timeutc.valid & UBX_RX_NAV_TIMEUTC_VALID_VALIDUTC) {
 			// convert to unix timestamp
@@ -1856,35 +1847,18 @@ GPSDriverUBX::payloadRxDone()
 			timeinfo.tm_min		= _buf.payload_rx_nav_timeutc.min;
 			timeinfo.tm_sec		= _buf.payload_rx_nav_timeutc.sec;
 			timeinfo.tm_isdst	= 0;
-#ifndef NO_MKTIME
+
 			time_t epoch = mktime(&timeinfo);
 
 			// only set the time if it makes sense
-
 			if (epoch > GPS_EPOCH_SECS) {
-				// FMUv2+ boards have a hardware RTC, but GPS helps us to configure it
-				// and control its drift. Since we rely on the HRT for our monotonic
-				// clock, updating it from time to time is safe.
-
-				timespec ts{};
-				ts.tv_sec = epoch;
-				ts.tv_nsec = _buf.payload_rx_nav_timeutc.nano;
-
-				setClock(ts);
-
 				_gps_position->time_utc_usec = static_cast<uint64_t>(epoch) * 1000000ULL;
 				_gps_position->time_utc_usec += _buf.payload_rx_nav_timeutc.nano / 1000;
 
 			} else {
 				_gps_position->time_utc_usec = 0;
 			}
-
-#else
-			_gps_position->time_utc_usec = 0;
-#endif
 		}
-
-		_last_timestamp_time = gps_absolute_time();
 
 		ret = 1;
 		break;
@@ -2046,10 +2020,6 @@ GPSDriverUBX::payloadRxDone()
 
 	default:
 		break;
-	}
-
-	if (ret > 0) {
-		_gps_position->timestamp_time_relative = (int32_t)(_last_timestamp_time - _gps_position->timestamp);
 	}
 
 	return ret;
