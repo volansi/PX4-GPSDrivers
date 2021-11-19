@@ -66,6 +66,7 @@
 /**** Warning macros, disable to save memory */
 #define UBX_WARN(...)         {GPS_WARN(__VA_ARGS__);}
 #define UBX_DEBUG(...)        {/*GPS_WARN(__VA_ARGS__);*/}
+#define UBX_DEBUG2(...)        {GPS_WARN(__VA_ARGS__);}
 
 GPSDriverUBX::GPSDriverUBX(Interface gpsInterface, GPSCallbackPtr callback, void *callback_user,
 			   sensor_gps_s *gps_position, satellite_info_s *satellite_info, uint8_t dynamic_model,
@@ -622,6 +623,7 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 	// Configure message rates
 	// Send a new CFG-VALSET message to make sure it does not get too large
 	cfg_valset_msg_size = initCfgValset();
+	// ??? these I2C requests aren't repeated if Interface::UART
 	cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_PVT_I2C, 1, cfg_valset_msg_size);
 	_use_nav_pvt = true;
 	cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_DOP_I2C, 1, cfg_valset_msg_size);
@@ -636,13 +638,50 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		return -1;
 	}
 
+	if (_interface == Interface::UART) {
+		// Disable GPS protocols at I2C
+		cfg_valset_msg_size = initCfgValset();
+		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_I2CINPROT_UBX, 0, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_I2CINPROT_NMEA, 0, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_I2CINPROT_RTCM3X, 0, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_I2COUTPROT_UBX, 0, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_I2COUTPROT_NMEA, 0, cfg_valset_msg_size);
+
+		if (_board == Board::u_blox9_F9P) {
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_I2COUTPROT_RTCM3X, 0, cfg_valset_msg_size);
+		}
+		
+		// Config nav and sv msgs 
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_PVT_UART1, 1, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_DOP_UART1, 1, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_SAT_UART1, (_satellite_info != nullptr) ? 10 : 0, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_MON_RF_UART1, 1, cfg_valset_msg_size);
+
+		// check GPS dump param --> enable RAWX
+		{//if (_dump_communication_mode !=gps_dump_comm_mode_t::Disabled) { // is this passed?
+		  cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_RXM_RAWX_UART1, 1, cfg_valset_msg_size);
+		  cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_RXM_SFRBX_UART1, 1, cfg_valset_msg_size);
+		}
+		
+		if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
+			return -1;
+		}
+
+		if (waitForAck(UBX_MSG_CFG_VALSET, UBX_CONFIG_TIMEOUT, true) < 0) {
+			return -1;
+		}
+	}
+
 	int uart2_baudrate = 230400;
 
 	if (_mode == UBXMode::RoverWithMovingBase) {
 		UBX_DEBUG("Configuring UART2 for rover");
 		cfg_valset_msg_size = initCfgValset();
-		// heading output @3Hz
-		cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_I2C, 3, cfg_valset_msg_size);
+		// heading output @3Hz (UART1? or I2C? or both? What hardware?)
+		if (_interface != Interface::UART)
+		  cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_I2C, 3, cfg_valset_msg_size);
+		else
+		  cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, 5, cfg_valset_msg_size);
 		// enable RTCM input on uart2 + set baudrate
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_STOPBITS, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_DATABITS, 0, cfg_valset_msg_size);
@@ -676,13 +715,20 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2OUTPROT_RTCM3X, 1, cfg_valset_msg_size);
 		cfgValset<uint32_t>(UBX_CFG_KEY_CFG_UART2_BAUDRATE, uart2_baudrate, cfg_valset_msg_size);
 
+		// Ublox says to match RTCM TYPES MSM4/MSM7on all ports (issue if combining moving with static base)
+		// Use MSM7 here as that's what's used for static base. MSM4 may have lower bandwidth requirement.
+		// Turn off Galileo BeiDou to get faster solutions, TBD if GLONASS helps RTK as it lacks common carrier freq.
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_0_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_1_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1077_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1087_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1097_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1127_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART2, 1, cfg_valset_msg_size);
+		//cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_1_UART2, 1, cfg_valset_msg_size); //not needed by F9P. M8P?? 
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1077_UART2, 1, cfg_valset_msg_size);   // GPS 
+		if (gnssSystems & GNSSSystemsMask::ENABLE_GLONASS) {
+		  cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1087_UART2, 1, cfg_valset_msg_size);   // GLONASS
+		  cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART2, 1, cfg_valset_msg_size);   // GLONASS BIAS 
+		}
+		if (gnssSystems & GNSSSystemsMask::ENABLE_GALILEO) 
+		  cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1097_UART2, 1, cfg_valset_msg_size);   // Galileo
+		if (gnssSystems & GNSSSystemsMask::ENABLE_BEIDOU) 
+		  cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1127_UART2, 1, cfg_valset_msg_size);   // BeiDou
 
 		if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
 			return -1;
@@ -1327,14 +1373,14 @@ GPSDriverUBX::payloadRxInit()
 
 		if (_proto_ver_27_or_higher) {
 			uint32_t key_id = 0;
-
+			// RAWX is very useful. TBD: Check overhead of logging it.
 			switch (_rx_msg) { // we cannot infer the config Key ID from _rx_msg for protocol version 27+
 			case UBX_MSG_RXM_RAWX:
-				key_id = UBX_CFG_KEY_MSGOUT_UBX_RXM_RAWX_I2C;
+			  //key_id = UBX_CFG_KEY_MSGOUT_UBX_RXM_RAWX_I2C;
 				break;
 
 			case UBX_MSG_RXM_SFRBX:
-				key_id = UBX_CFG_KEY_MSGOUT_UBX_RXM_SFRBX_I2C;
+			  //key_id = UBX_CFG_KEY_MSGOUT_UBX_RXM_SFRBX_I2C;
 				break;
 			}
 
@@ -1344,7 +1390,7 @@ GPSDriverUBX::payloadRxInit()
 				if (t > _disable_cmd_last + DISABLE_MSG_INTERVAL && _configured) {
 					/* don't attempt for every message to disable, some might not be disabled */
 					_disable_cmd_last = t;
-					UBX_DEBUG("ubx disabling msg 0x%04x (0x%04x)", SWAP16((unsigned)_rx_msg), key_id);
+					UBX_DEBUG("ubx disabling msg 0x%04x (0x%04x)", SWAP16((unsigned)_rx_msg), (unsigned int)key_id);
 
 					// this will overwrite _buf, which is fine, as we'll return -1 and abort further parsing
 					int cfg_valset_msg_size = initCfgValset();
@@ -1595,7 +1641,7 @@ GPSDriverUBX::payloadRxAddMonVer(const uint8_t b)
 			// Part 1 complete: decode Part 1 buffer and calculate hash for SW&HW version strings
 			_ubx_version = fnv1_32_str(_buf.payload_rx_mon_ver_part1.swVersion, FNV1_32_INIT);
 			_ubx_version = fnv1_32_str(_buf.payload_rx_mon_ver_part1.hwVersion, _ubx_version);
-			UBX_DEBUG("VER hash 0x%08x", _ubx_version);
+			UBX_DEBUG("VER hash 0x%08x", (unsigned int)_ubx_version);
 			UBX_DEBUG("VER hw  \"%10s\"", _buf.payload_rx_mon_ver_part1.hwVersion);
 			UBX_DEBUG("VER sw  \"%30s\"", _buf.payload_rx_mon_ver_part1.swVersion);
 
@@ -1883,7 +1929,7 @@ GPSDriverUBX::payloadRxDone()
 			ubx_payload_rx_nav_svin_t &svin = _buf.payload_rx_nav_svin;
 
 			UBX_DEBUG("Survey-in status: %is cur accuracy: %imm nr obs: %i valid: %i active: %i",
-				  svin.dur, svin.meanAcc / 10, svin.obs, static_cast<int>(svin.valid), static_cast<int>(svin.active));
+				  (unsigned int)svin.dur, (unsigned int)(svin.meanAcc / 10), (unsigned int)svin.obs, static_cast<int>(svin.valid), static_cast<int>(svin.active));
 
 			SurveyInStatus status{};
 			double ecef_x = (static_cast<double>(svin.meanX) + static_cast<double>(svin.meanXHP) * 0.01) * 0.01;
@@ -1934,7 +1980,7 @@ GPSDriverUBX::payloadRxDone()
 			bool rel_pos_valid = _buf.payload_rx_nav_relposned.flags & (1 << 2);
 			(void)heading_acc;
 			(void)rel_length_acc;
-			UBX_DEBUG("Heading: %.1f deg, acc: %.1f deg, relLen: %.1f cm, relAcc: %.1f cm, valid: %i %i", (double)heading,
+			UBX_DEBUG2("Heading: %.1f deg, acc: %.1f deg, relLen: %.1f cm, relAcc: %.1f cm, valid: %i %i", (double)heading,
 				  (double)heading_acc, (double)rel_length, (double)rel_length_acc, heading_valid, rel_pos_valid);
 
 			if (heading_valid && rel_pos_valid && rel_length < 1000.f) { // validity & sanity checks
