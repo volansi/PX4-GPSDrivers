@@ -47,7 +47,8 @@
 #define ASH_DEBUG(...)		{/*GPS_WARN(__VA_ARGS__);*/}
 
 GPSDriverAshtech::GPSDriverAshtech(GPSCallbackPtr callback, void *callback_user,
-				   sensor_gps_s *gps_position, satellite_info_s *satellite_info,
+				   struct vehicle_gps_position_s *gps_position,
+				   struct satellite_info_s *satellite_info,
 				   float heading_offset) :
 	GPSBaseStationSupport(callback, callback_user),
 	_heading_offset(heading_offset),
