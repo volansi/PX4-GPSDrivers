@@ -641,8 +641,13 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 	if (_mode == UBXMode::RoverWithMovingBase) {
 		UBX_DEBUG("Configuring UART2 for rover");
 		cfg_valset_msg_size = initCfgValset();
-		// heading output @3Hz
-		cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_I2C, 3, cfg_valset_msg_size);
+		// heading output @XHz (UART1 or I2C depending)
+		if (_interface != Interface::UART) {
+			cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_I2C, 3, cfg_valset_msg_size);
+
+		} else {
+			cfgValsetPort(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, 5, cfg_valset_msg_size);
+		}
 		// enable RTCM input on uart2 + set baudrate
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_STOPBITS, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_DATABITS, 0, cfg_valset_msg_size);
