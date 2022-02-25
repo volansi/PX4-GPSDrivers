@@ -331,7 +331,7 @@ GPSDriverUBX::configure(unsigned &baudrate, const GPSConfig &config)
 	int ret;
 
 	if (_proto_ver_27_or_higher) {
-		ret = configureDevice(config.gnss_systems);
+	        ret = configureDevice(config /*.gnss_systems*/);
 
 	} else {
 		ret = configureDevicePreV27(config.gnss_systems);
@@ -512,7 +512,7 @@ int GPSDriverUBX::configureDevicePreV27(const GNSSSystemsMask &gnssSystems)
 	return 0;
 }
 
-int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
+int GPSDriverUBX::configureDevice(const GPSConfig &config)
 {
 	/* set configuration parameters */
 	int cfg_valset_msg_size = initCfgValset();
@@ -535,7 +535,7 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 	// the number of used satellites will be restricted to 16. Not mentioned in datasheet)
 	int rate_meas;
 
-	if (_mode != UBXMode::Normal) {
+	if ((_mode != UBXMode::Normal) && (static_cast<int32_t>(config.gnss_systems) == 0)) {
 		rate_meas = 125; //8Hz for heading.
 
 	} else {
@@ -565,11 +565,11 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 	waitForAck(UBX_MSG_CFG_VALSET, UBX_CONFIG_TIMEOUT, false);
 
 	// configure active GNSS systems (leave signal bands as is)
-	if (static_cast<int32_t>(gnssSystems) != 0) {
+	if (static_cast<int32_t>(config.gnss_systems) != 0) {
 		cfg_valset_msg_size = initCfgValset();
 
 		// GPS and QZSS should always be enabled and disabled together, according to uBlox
-		if (gnssSystems & GNSSSystemsMask::ENABLE_GPS) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GPS) {
 			UBX_DEBUG("GNSS Systems: Use GPS + QZSS");
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_GPS_ENA, 1, cfg_valset_msg_size);
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_QZSS_ENA, 1, cfg_valset_msg_size);
@@ -579,7 +579,7 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_QZSS_ENA, 0, cfg_valset_msg_size);
 		}
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_GALILEO) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GALILEO) {
 			UBX_DEBUG("GNSS Systems: Use Galileo");
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_GAL_ENA, 1, cfg_valset_msg_size);
 
@@ -588,7 +588,7 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		}
 
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_BEIDOU) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_BEIDOU) {
 			UBX_DEBUG("GNSS Systems: Use BeiDou");
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_BDS_ENA, 1, cfg_valset_msg_size);
 
@@ -596,7 +596,7 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_BDS_ENA, 0, cfg_valset_msg_size);
 		}
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_GLONASS) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GLONASS) {
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_GLO_ENA, 1, cfg_valset_msg_size);
 
 		} else {
@@ -615,7 +615,7 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		// send SBAS config separately, because it seems to be buggy (with u-center, too)
 		cfg_valset_msg_size = initCfgValset();
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_SBAS) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_SBAS) {
 			UBX_DEBUG("GNSS Systems: Use SBAS");
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_SBAS_ENA, 1, cfg_valset_msg_size);
 			cfgValset<uint8_t>(UBX_CFG_KEY_SIGNAL_SBAS_L1CA_ENA, 1, cfg_valset_msg_size);
@@ -677,8 +677,8 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfg_valset_msg_size = initCfgValset();
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_UBX, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_RTCM3X, 0, cfg_valset_msg_size);
-		// heading output period 1 second (is this once per second or once per nav cycle?)
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, 1, cfg_valset_msg_size);
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, config.heading_rate_hz, cfg_valset_msg_size);
+		UBX_DEBUG("UBXMode::RoverWithMovingBase Setting heading to %d Hz", config.heading_rate_hz);
 		// enable RTCM input on uart2 + set baudrate
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_STOPBITS, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_DATABITS, 0, cfg_valset_msg_size);
@@ -718,16 +718,16 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_0_UART2, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1074_UART2, 1, cfg_valset_msg_size);
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_GLONASS) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GLONASS) {
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART2, 1, cfg_valset_msg_size);
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1084_UART2, 1, cfg_valset_msg_size);
 		}
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_GALILEO) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GALILEO) {
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1094_UART2, 1, cfg_valset_msg_size);
 		}
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_BEIDOU) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_BEIDOU) {
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1124_UART2, 1, cfg_valset_msg_size);
 		}
 
@@ -749,8 +749,9 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1INPROT_NMEA, 0, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_UBX, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_RTCM3X, 0, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, 1, cfg_valset_msg_size); // why 1Hz?
-
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, config.heading_rate_hz, cfg_valset_msg_size);
+		UBX_DEBUG("UBXMode::RoverWithMovingBaseUART1 Setting heading to %d Hz", config.heading_rate_hz);
+		
 		if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
 			return -1;
 		}
@@ -776,16 +777,16 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_0_UART2, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1074_UART2, 1, cfg_valset_msg_size);
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_GLONASS) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GLONASS) {
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART2, 1, cfg_valset_msg_size);
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1084_UART2, 1, cfg_valset_msg_size);
 		}
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_GALILEO) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GALILEO) {
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1094_UART2, 1, cfg_valset_msg_size);
 		}
 
-		if (gnssSystems & GNSSSystemsMask::ENABLE_BEIDOU) {
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_BEIDOU) {
 			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1124_UART2, 1, cfg_valset_msg_size);
 		}
 

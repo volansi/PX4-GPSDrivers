@@ -977,7 +977,7 @@ private:
 	 * @param gnssSystems Set of GNSS systems to use
 	 * @return 0 on success, <0 on error
 	 */
-	int configureDevice(const GNSSSystemsMask &gnssSystems);
+	int configureDevice(const GPSConfig &config);
 	/**
 	 * Send configuration values and desired message rates (for protocol version < 27)
 	 * @param gnssSystems Set of GNSS systems to use
