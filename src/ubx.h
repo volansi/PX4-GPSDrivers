@@ -913,19 +913,29 @@ typedef enum {
 class GPSDriverUBX : public GPSBaseStationSupport
 {
 public:
-	enum class UBXMode : uint8_t {
-		Normal,                    ///< all non-heading configurations
-		RoverWithMovingBase,       ///< expect RTCM input on UART2 from a moving base for heading output
-		MovingBase,                ///< RTCM output on UART2 to a rover (GPS is installed on the vehicle)
-		RoverWithMovingBaseUART1, ///< expect RTCM input on UART1 from a moving base for heading output
-		MovingBaseUART1,          ///< RTCM output on UART1 to a rover (GPS is installed on the vehicle)
+
+	union UARTProto {
+		/* Bitmask of protocols to send or receive on a chosen UART */
+		uint8_t value;
+		struct {
+			uint8_t UBX  : 1; // Bit 1
+			uint8_t RTCM3X : 1; // Bit 0
+			uint8_t NMEA : 1; // Bit 2
+		};
+	};
+
+	struct UBXConfig {
+		UARTProto uart1_rxproto;
+		UARTProto uart1_txproto;
+		UARTProto uart2_rxproto;
+		UARTProto uart2_txproto;
 	};
 
 	GPSDriverUBX(Interface gpsInterface, GPSCallbackPtr callback, void *callback_user,
 		     sensor_gps_s *gps_position, satellite_info_s *satellite_info,
+		     const UBXConfig &config,
 		     uint8_t dynamic_model = 7,
-		     float heading_offset = 0.f,
-		     UBXMode mode = UBXMode::Normal);
+		     float heading_offset = 0.f);
 
 	virtual ~GPSDriverUBX();
 
@@ -933,7 +943,7 @@ public:
 	int receive(unsigned timeout) override;
 	int reset(GPSRestartType restart_type) override;
 
-	bool shouldInjectRTCM() override { return _mode != UBXMode::RoverWithMovingBase; }
+	bool shouldInjectRTCM() override { return _ubx_config.uart1_rxproto.RTCM3X; }
 
 	enum class Board : uint8_t {
 		unknown = 0,
@@ -1110,7 +1120,7 @@ private:
 
 	RTCMParsing *_rtcm_parsing{nullptr};
 
-	const UBXMode _mode;
+	const UBXConfig _ubx_config;
 	const float _heading_offset;
 };
 
