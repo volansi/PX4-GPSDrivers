@@ -179,7 +179,7 @@ public:
 	struct GPSConfig {
 		OutputMode output_mode;
 		GNSSSystemsMask gnss_systems;
-	        int heading_rate_hz;  // desired heading measurement rate (default to 1) should this be enum or just int?
+		int heading_rate_hz;  // desired heading measurement rate (default to 1) should this be enum or just int?
 	};
 
 
