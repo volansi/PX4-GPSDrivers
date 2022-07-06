@@ -149,7 +149,6 @@ GPSDriverUBX::configure(unsigned &baudrate, const GPSConfig &config)
 			}
 
 			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_NMEA, 0, cfg_valset_msg_size);
-			// TODO: are we ever connected to UART2?
 
 			// USB
 			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_USBINPROT_UBX, 1, cfg_valset_msg_size);
@@ -786,6 +785,49 @@ int GPSDriverUBX::configureDevice(const GPSConfig &config)
 			return -1;
 		}
 
+		if (config.extra_logging) {
+			cfg_valset_msg_size = initCfgValset();
+
+			// Enable output on UART2 to external device
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_STOPBITS, 1, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_DATABITS, 0, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_PARITY, 0, cfg_valset_msg_size);
+			cfgValset<uint32_t>(UBX_CFG_KEY_CFG_UART2_BAUDRATE, uart2_baudrate, cfg_valset_msg_size);
+
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2INPROT_UBX, 0, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2INPROT_RTCM3X, 1, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2INPROT_NMEA, 0, cfg_valset_msg_size);
+
+			cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2OUTPROT_UBX, 1, cfg_valset_msg_size);
+
+			// Only enable 2nd protocol if using U-Blox firmware > HPG 1.30 (Required for dual-protocol on UART2)
+			if (_ubx_fwver_major >= 1 && _ubx_fwver_minor >= 30) {
+				cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2OUTPROT_RTCM3X, 1, cfg_valset_msg_size);
+
+				// Configure the RTCM output
+				cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_0_UART2, 1, cfg_valset_msg_size);
+				cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1074_UART2, 1, cfg_valset_msg_size);
+
+				if (config.gnss_systems & GNSSSystemsMask::ENABLE_GLONASS) {
+					cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART2, 1, cfg_valset_msg_size);
+					cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1084_UART2, 1, cfg_valset_msg_size);
+				}
+			}
+
+			// Configure additional UBX output
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_RXM_RAWX_UART2, 1, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_RXM_SFRBX_UART2, 1, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART2, heading_rate_hz, cfg_valset_msg_size);
+
+			if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
+				return -1;
+			}
+
+			if (waitForAck(UBX_MSG_CFG_VALSET, UBX_CONFIG_TIMEOUT, true) < 0) {
+				return -1;
+			}
+		}
+
 	} else if (_mode == UBXMode::MovingBaseUART1) {
 		UBX_DEBUG("Configuring UART1 for moving base");
 		cfg_valset_msg_size = initCfgValset();
@@ -831,6 +873,25 @@ int GPSDriverUBX::configureDevice(const GPSConfig &config)
 			return -1;
 		}
 
+		if (config.extra_logging) {
+			// Enable UBX output in addition to RTCM on UART
+			// Only enable 2nd protocol if using U-Blox firmware > HPG 1.30 (Required for dual-protocol on UART2)
+			if (_ubx_fwver_major >= 1 && _ubx_fwver_minor >= 30) {
+				cfg_valset_msg_size = initCfgValset();
+
+				cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2OUTPROT_UBX, 1, cfg_valset_msg_size);
+				cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_RXM_RAWX_UART2, 1, cfg_valset_msg_size);
+				cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_RXM_SFRBX_UART2, 1, cfg_valset_msg_size);
+
+				if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
+					return -1;
+				}
+
+				if (waitForAck(UBX_MSG_CFG_VALSET, UBX_CONFIG_TIMEOUT, true) < 0) {
+					return -1;
+				}
+			}
+		}
 	}
 
 	return 0;
@@ -1781,6 +1842,17 @@ GPSDriverUBX::payloadRxAddMonVer(const uint8_t b)
 
 			if (fwver_str != nullptr) {
 				GPS_INFO("u-blox firmware version: %s", fwver_str + strlen("FWVER="));
+
+				char fwtype[3] = {};
+				int major, minor;
+				sscanf(fwver_str + strlen("FWVER="), "%3s %d.%d", fwtype, &major, &minor);
+
+				// Only assign known-valid version numbers
+				if (strncmp(fwtype, "HPG", 3) == 0) {
+					_ubx_fwver_major = major;
+					_ubx_fwver_minor = minor;
+					UBX_DEBUG("FW Type: %s, Major: %d, Minor: %d", fwtype, major, minor);
+				}
 			}
 
 			// "PROTVER=" Supported protocol version.

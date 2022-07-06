@@ -187,6 +187,7 @@ public:
 	struct GPSConfig {
 		OutputMode output_mode;
 		GNSSSystemsMask gnss_systems;
+		bool extra_logging; // Enable extra output from the receiver for logging purposes.  Receiver dependent.
 	};
 
 

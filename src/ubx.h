@@ -1101,6 +1101,8 @@ private:
 	uint16_t _rx_payload_length{0};
 
 	uint32_t _ubx_version{0};
+	uint16_t _ubx_fwver_major{0};
+	uint16_t _ubx_fwver_minor{0};
 
 	uint64_t _last_timestamp_time{0};
 
