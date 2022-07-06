@@ -977,13 +977,13 @@ private:
 	 * @param gnssSystems Set of GNSS systems to use
 	 * @return 0 on success, <0 on error
 	 */
-	int configureDevice(const GNSSSystemsMask &gnssSystems);
+	int configureDevice(const GPSConfig &config);
 	/**
 	 * Send configuration values and desired message rates (for protocol version < 27)
 	 * @param gnssSystems Set of GNSS systems to use
 	 * @return 0 on success, <0 on error
 	 */
-	int configureDevicePreV27(const GNSSSystemsMask &gnssSystems);
+	int configureDevicePreV27(const GPSConfig &config);
 
 	/**
 	 * Add a configuration value to _buf and increase the message size msg_size as needed

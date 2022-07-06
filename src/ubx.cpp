@@ -331,10 +331,10 @@ GPSDriverUBX::configure(unsigned &baudrate, const GPSConfig &config)
 	int ret;
 
 	if (_proto_ver_27_or_higher) {
-		ret = configureDevice(config.gnss_systems);
+		ret = configureDevice(config);
 
 	} else {
-		ret = configureDevicePreV27(config.gnss_systems);
+		ret = configureDevicePreV27(config);
 	}
 
 	if (ret != 0) {
@@ -357,8 +357,10 @@ GPSDriverUBX::configure(unsigned &baudrate, const GPSConfig &config)
 }
 
 
-int GPSDriverUBX::configureDevicePreV27(const GNSSSystemsMask &gnssSystems)
+int GPSDriverUBX::configureDevicePreV27(const GPSConfig &config)
 {
+	const GNSSSystemsMask &gnssSystems = config.gnss_systems;
+
 	/* Send a CFG-RATE message to define update rate */
 	memset(&_buf.payload_tx_cfg_rate, 0, sizeof(_buf.payload_tx_cfg_rate));
 	_buf.payload_tx_cfg_rate.measRate	= UBX_TX_CFG_RATE_MEASINTERVAL;
@@ -512,8 +514,10 @@ int GPSDriverUBX::configureDevicePreV27(const GNSSSystemsMask &gnssSystems)
 	return 0;
 }
 
-int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
+int GPSDriverUBX::configureDevice(const GPSConfig &config)
 {
+	const GNSSSystemsMask &gnssSystems = config.gnss_systems;
+
 	/* set configuration parameters */
 	int cfg_valset_msg_size = initCfgValset();
 	cfgValset<uint8_t>(UBX_CFG_KEY_NAVSPG_FIXMODE, 3 /* Auto 2d/3d */, cfg_valset_msg_size);
@@ -533,16 +537,17 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 	// measurement rate
 	// In case of F9P not in moving base mode we use 10Hz, otherwise 8Hz (receivers such as M9N can go higher as well, but
 	// the number of used satellites will be restricted to 16. Not mentioned in datasheet)
-	int rate_meas;
+	int rate_meas_ms = 125;
+	int heading_rate_hz = 8;
 
-	if (_mode != UBXMode::Normal) {
-		rate_meas = 125; //8Hz for heading.
-
-	} else {
-		rate_meas = (_board == Board::u_blox9_F9P) ? 100 : 125;
+	if (_board == Board::u_blox9_F9P && (_mode == UBXMode::Normal || gnssSystems != GNSSSystemsMask::RECEIVER_DEFAULTS)) {
+		// (U-Blox F9P only)
+		// If not calculating heading, or if specifying specific constellations, then use a 10Hz update rate
+		rate_meas_ms = 100;
+		heading_rate_hz = 10;
 	}
 
-	cfgValset<uint16_t>(UBX_CFG_KEY_RATE_MEAS, rate_meas, cfg_valset_msg_size);
+	cfgValset<uint16_t>(UBX_CFG_KEY_RATE_MEAS, rate_meas_ms, cfg_valset_msg_size);
 	cfgValset<uint16_t>(UBX_CFG_KEY_RATE_NAV, 1, cfg_valset_msg_size);
 	cfgValset<uint8_t>(UBX_CFG_KEY_RATE_TIMEREF, 0, cfg_valset_msg_size);
 
@@ -677,8 +682,10 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfg_valset_msg_size = initCfgValset();
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_UBX, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_RTCM3X, 0, cfg_valset_msg_size);
-		// heading output period 1 second
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, 1, cfg_valset_msg_size);
+
+		// heading output period to specified value
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, heading_rate_hz, cfg_valset_msg_size);
+
 		// enable RTCM input on uart2 + set baudrate
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_STOPBITS, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2_DATABITS, 0, cfg_valset_msg_size);
@@ -712,12 +719,24 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART2OUTPROT_RTCM3X, 1, cfg_valset_msg_size);
 		cfgValset<uint32_t>(UBX_CFG_KEY_CFG_UART2_BAUDRATE, uart2_baudrate, cfg_valset_msg_size);
 
+		// Ublox says to match RTCM TYPES MSM4/MSM7on all ports (issue if combining moving with static base)
+		// Use MSM7 here as that's what's used for static base. MSM4 may have lower bandwidth requirement.
+		// Turn off Galileo BeiDou to get faster solutions, TBD if GLONASS helps RTK as it lacks common carrier freq.
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_0_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART2, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1074_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1084_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1094_UART2, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1124_UART2, 1, cfg_valset_msg_size);
+
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GLONASS) {
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART2, 1, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1084_UART2, 1, cfg_valset_msg_size);
+		}
+
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GALILEO) {
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1094_UART2, 1, cfg_valset_msg_size);
+		}
+
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_BEIDOU) {
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1124_UART2, 1, cfg_valset_msg_size);
+		}
 
 
 		if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
@@ -730,14 +749,15 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 
 	} else if (_mode == UBXMode::RoverWithMovingBaseUART1) {
 		UBX_DEBUG("Configuring UART1 for rover");
-		// heading output period 1 second
 		cfg_valset_msg_size = initCfgValset();
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1INPROT_UBX, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1INPROT_RTCM3X, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1INPROT_NMEA, 0, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_UBX, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_CFG_UART1OUTPROT_RTCM3X, 0, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, 1, cfg_valset_msg_size);
+
+		// Set heading output period to specified rate
+		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, heading_rate_hz, cfg_valset_msg_size);
 
 		if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
 			return -1;
@@ -760,12 +780,24 @@ int GPSDriverUBX::configureDevice(const GNSSSystemsMask &gnssSystems)
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1, 0, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART2, 0, cfg_valset_msg_size);
 
+		// Ublox says to match RTCM TYPES MSM4/MSM7on all ports (issue if combining moving with static base)
+		// Use MSM7 here as that's what's used for static base. MSM4 may have lower bandwidth requirement.
+		// Turn off Galileo BeiDou to get faster solutions, TBD if GLONASS helps RTK as it lacks common carrier freq.
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_0_UART1, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART1, 1, cfg_valset_msg_size);
 		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1074_UART1, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1084_UART1, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1094_UART1, 1, cfg_valset_msg_size);
-		cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1124_UART1, 1, cfg_valset_msg_size);
+
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GLONASS) {
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1230_UART1, 1, cfg_valset_msg_size);
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1084_UART1, 1, cfg_valset_msg_size);
+		}
+
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_GALILEO) {
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1094_UART1, 1, cfg_valset_msg_size);
+		}
+
+		if (config.gnss_systems & GNSSSystemsMask::ENABLE_BEIDOU) {
+			cfgValset<uint8_t>(UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1124_UART1, 1, cfg_valset_msg_size);
+		}
 
 		if (!sendMessage(UBX_MSG_CFG_VALSET, (uint8_t *)&_buf, cfg_valset_msg_size)) {
 			return -1;
