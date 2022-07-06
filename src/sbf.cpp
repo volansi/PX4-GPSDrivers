@@ -650,7 +650,7 @@ int GPSDriverSBF::payloadRxDone()
 			if (error_aux1 == 0 && error_aux2 == 0) {
 				float heading_acc = _buf.payload_att_cov_euler.cov_headhead;
 				heading_acc *= M_PI_F / 180.0f; // deg to rad, now in range [0, 2pi]
-				//_gps_position->heading_accuracy = heading_acc;
+				_gps_position->heading_accuracy = heading_acc;
 				// SBF_DEBUG("Heading-Accuracy: %.3f rad", (double) _gps_position->heading_accuracy)
 				//SBF_DEBUG("AttCovEuler handled");
 
