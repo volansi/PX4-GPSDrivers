@@ -353,6 +353,11 @@
 #define UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART1 0x2091008e
 #define UBX_CFG_KEY_MSGOUT_UBX_NAV_RELPOSNED_UART2 0x2091008f
 
+#define UBX_CFG_KEY_MSGOUT_UBX_RXM_SFRBX_UART1     0x20910232
+#define UBX_CFG_KEY_MSGOUT_UBX_RXM_RAWX_UART1      0x209102a5
+#define UBX_CFG_KEY_MSGOUT_UBX_RXM_SFRBX_UART2     0x20910233
+#define UBX_CFG_KEY_MSGOUT_UBX_RXM_RAWX_UART2      0x209102a6
+
 #define UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_0_UART1  0x209102ff
 #define UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE4072_1_UART1  0x20910382
 #define UBX_CFG_KEY_MSGOUT_RTCM_3X_TYPE1077_UART1    0x209102cd
@@ -977,13 +982,13 @@ private:
 	 * @param gnssSystems Set of GNSS systems to use
 	 * @return 0 on success, <0 on error
 	 */
-	int configureDevice(const GNSSSystemsMask &gnssSystems);
+	int configureDevice(const GPSConfig &config);
 	/**
 	 * Send configuration values and desired message rates (for protocol version < 27)
 	 * @param gnssSystems Set of GNSS systems to use
 	 * @return 0 on success, <0 on error
 	 */
-	int configureDevicePreV27(const GNSSSystemsMask &gnssSystems);
+	int configureDevicePreV27(const GPSConfig &config);
 
 	/**
 	 * Add a configuration value to _buf and increase the message size msg_size as needed
@@ -1096,6 +1101,8 @@ private:
 	uint16_t _rx_payload_length{0};
 
 	uint32_t _ubx_version{0};
+	uint16_t _ubx_fwver_major{0};
+	uint16_t _ubx_fwver_minor{0};
 
 	uint64_t _last_timestamp_time{0};
 
